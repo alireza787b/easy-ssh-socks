@@ -20,7 +20,14 @@ Create secure proxy connections with just one command! Perfect for bypassing res
 
 ### 1. Download the Script
 ```bash
-wget https://raw.githubusercontent.com/yourusername/easy-ssh-socks/main/socks-proxy.sh
+wget https://raw.githubusercontent.com/alireza787b/easy-ssh-socks/main/socks-proxy.sh
+chmod +x socks-proxy.sh
+```
+Or preferably clone the repo:
+```bash
+cd ~
+git clone https://github.com/alireza787b/easy-ssh-socks
+cd easy-ssh-socks
 chmod +x socks-proxy.sh
 ```
 
