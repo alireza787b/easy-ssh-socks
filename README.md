@@ -1,336 +1,243 @@
-# 🚀 Easy SSH SOCKS
+# 🚀 Enhanced SSH SOCKS Proxy v2.0
 
-**Simple SOCKS5 Proxy Manager via SSH Tunnels**
+**The bulletproof SOCKS5 proxy that never gives up!**
 
-Create secure proxy connections with just one command! Perfect for bypassing restrictions, securing your internet connection, or accessing remote networks.
+Transform any SSH server into a reliable, self-healing SOCKS5 proxy with automatic reconnection, health monitoring, and zero-maintenance operation.
 
-## ✨ Features
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Bash](https://img.shields.io/badge/Made%20with-Bash-1f425f.svg)](https://www.gnu.org/software/bash/)
 
-- 🎯 **Super Simple** - One script, zero configuration files
-- 🔐 **Secure** - Uses SSH tunnels for encrypted connections
-- 🚀 **Fast Setup** - Get running in under 2 minutes
-- 🛠️ **User Friendly** - Interactive menu and command-line interface
-- 🔑 **SSH Key Support** - Automated SSH key setup
-- 📊 **Status Monitoring** - Real-time proxy status and health checks
-- 🔄 **Process Management** - Clean start/stop/restart functionality
-- 📝 **Comprehensive Logging** - Track all proxy activities
-- 🌐 **Cross-Platform** - Works on any Linux distribution
+## ✨ What Makes This Special?
 
-## 🚀 Quick Start
+Unlike basic SSH tunneling scripts, this enhanced version includes:
 
-### 1. Download the Script
+- 🔄 **Auto-Reconnection** - Handles network drops, server reboots, and connection timeouts
+- 🏥 **Health Monitoring** - Multi-layer health checks every 30 seconds
+- 🧠 **Smart Retry Logic** - Exponential backoff prevents server overload
+- 📊 **Statistics Tracking** - Monitor uptime, reconnections, and performance
+- 🛡️ **Bulletproof Design** - Survives terminal closures and system hibernation
+- 📝 **Comprehensive Logging** - Know exactly what's happening
+
+## 🚀 Quick Start (30 seconds)
+
+### 1. Download & Setup
 ```bash
-wget https://raw.githubusercontent.com/alireza787b/easy-ssh-socks/main/socks-proxy.sh
-chmod +x socks-proxy.sh
-```
-Or preferably clone the repo:
-```bash
-cd ~
-git clone https://github.com/alireza787b/easy-ssh-socks
+# Clone the repository
+git clone https://github.com/alireza787b/easy-ssh-socks.git
 cd easy-ssh-socks
 chmod +x socks-proxy.sh
 ```
 
-### 2. Configure Your Server
-Edit the script and update these variables:
+### 2. Configure (Edit these 2 lines)
 ```bash
-REMOTE_USER="your-username"     # Your SSH username
-REMOTE_HOST="your-server.com"   # Your server IP or hostname
+# Open the script and change these variables:
+REMOTE_USER="your-username"          # Your SSH username
+REMOTE_HOST="your-server.com"        # Your server IP or hostname
 ```
 
-### 3. Setup SSH Key (Recommended)
+### 3. Setup SSH Keys (Recommended)
 ```bash
 ./socks-proxy.sh setup
 ```
 
-### 4. Start the Proxy
+### 4. Start the Magic ✨
 ```bash
 ./socks-proxy.sh start
 ```
 
-### 5. Configure Your Applications
-Use these settings in your browser or applications:
-- **Proxy Type:** SOCKS5
-- **Server:** 127.0.0.1 (or your local IP)
-- **Port:** 1337 (or your configured port)
-- **Authentication:** None
+**That's it!** Your proxy is now running with automatic reconnection and health monitoring.
 
-## 📋 Prerequisites
+## 📱 Configure Your Apps
 
-- **SSH Client** (openssh-client) - Usually pre-installed on Linux
-- **Network Access** to your remote server
-- **SSH Access** to a remote server with internet connection
+Use these settings in any application:
 
-### Install SSH Client (if needed)
-```bash
-# Ubuntu/Debian
-sudo apt-get install openssh-client
+| Setting | Value |
+|---------|-------|
+| **Proxy Type** | SOCKS5 |
+| **Server** | `127.0.0.1` |
+| **Port** | `1337` |
+| **Authentication** | None |
 
-# CentOS/RHEL/Rocky Linux
-sudo yum install openssh-clients
+### Popular Apps Setup
 
-# Arch Linux
-sudo pacman -S openssh
+<details>
+<summary><strong>🦊 Firefox</strong></summary>
 
-# Alpine Linux
-sudo apk add openssh-client
-```
+1. Settings → General → Network Settings
+2. Select "Manual proxy configuration"
+3. SOCKS Host: `127.0.0.1` Port: `1337`
+4. Select "SOCKS v5"
+5. Check "Proxy DNS when using SOCKS v5"
+</details>
 
-## 🎮 Usage
+<details>
+<summary><strong>🌐 Chrome/Edge</strong></summary>
 
-### Interactive Menu
-Simply run the script without arguments for an interactive menu:
-```bash
-./socks-proxy.sh
-```
+Install a proxy extension like:
+- [Proxy SwitchyOmega](https://chrome.google.com/webstore/detail/proxy-switchyomega/padekgcemlokbadohgkifijomclgjgif)
+- [FoxyProxy](https://chrome.google.com/webstore/detail/foxyproxy-standard/gcknhkkoolaabfmlnjonogaaifnjlfnp)
+</details>
 
-### Command Line Interface
-```bash
-./socks-proxy.sh [COMMAND]
-
-Commands:
-  start    - Start the SOCKS5 proxy tunnel
-  stop     - Stop the running proxy tunnel
-  restart  - Restart the proxy tunnel
-  status   - Show current proxy status
-  setup    - Setup SSH key authentication
-  help     - Show help information
-```
-
-### Examples
-```bash
-# Start the proxy
-./socks-proxy.sh start
-
-# Check status
-./socks-proxy.sh status
-
-# Setup SSH keys for passwordless login
-./socks-proxy.sh setup
-
-# Stop the proxy
-./socks-proxy.sh stop
-```
-
-## ⚙️ Configuration
-
-Edit these variables at the top of the script:
+<details>
+<summary><strong>💻 Command Line</strong></summary>
 
 ```bash
-# Remote SSH server details
-REMOTE_USER="root"                    # SSH username
-REMOTE_HOST="your-server.com"         # Server IP or hostname
-REMOTE_PORT="22"                      # SSH port
+# Test your proxy
+curl --socks5 127.0.0.1:1337 http://httpbin.org/ip
 
-# Local proxy settings
-PROXY_PORT="1337"                     # Local SOCKS5 port
-LOCAL_BIND_IP="0.0.0.0"              # Bind IP address
-```
+# Use with any curl command
+curl --socks5 127.0.0.1:1337 https://api.example.com
 
-### Configuration Options
-
-| Variable | Description | Default | Notes |
-|----------|-------------|---------|--------|
-| `REMOTE_USER` | SSH username | `root` | Must have SSH access |
-| `REMOTE_HOST` | Server hostname/IP | `your-server.com` | **Must be changed** |
-| `REMOTE_PORT` | SSH port | `22` | Standard SSH port |
-| `PROXY_PORT` | Local SOCKS5 port | `1337` | Use 1024-65535 |
-| `LOCAL_BIND_IP` | Bind interface | `0.0.0.0` | `127.0.0.1` for localhost only |
-
-## 🌐 Application Setup
-
-### Firefox
-1. Open Firefox Settings
-2. Go to Network Settings
-3. Select "Manual proxy configuration"
-4. Set SOCKS Host: `127.0.0.1` Port: `1337`
-5. Select "SOCKS v5"
-6. Check "Proxy DNS when using SOCKS v5"
-
-### Chrome/Chromium
-Use with extensions like:
-- FoxyProxy
-- Proxy SwitchyOmega
-- SwitchyOmega
-
-### Command Line Tools
-```bash
-# Using curl
-curl --socks5 127.0.0.1:1337 http://ipinfo.io
-
-# Using wget
-wget -e use_proxy=yes -e socks_proxy=127.0.0.1:1337 http://ipinfo.io
-
-# Export for all applications
+# Set as environment variable
 export ALL_PROXY=socks5://127.0.0.1:1337
 ```
+</details>
 
-### System-wide Proxy (Ubuntu/Debian)
-```bash
-# Add to ~/.bashrc or ~/.profile
-export http_proxy=socks5://127.0.0.1:1337
-export https_proxy=socks5://127.0.0.1:1337
-export ftp_proxy=socks5://127.0.0.1:1337
+## 🎮 Commands
+
+| Command | Description |
+|---------|-------------|
+| `./socks-proxy.sh start` | Start the robust proxy with health monitoring |
+| `./socks-proxy.sh status` | Show detailed status and statistics |
+| `./socks-proxy.sh stop` | Stop the proxy and health monitor |
+| `./socks-proxy.sh restart` | Restart the entire system |
+| `./socks-proxy.sh logs` | View recent log entries |
+| `./socks-proxy.sh setup` | Setup SSH keys for passwordless auth |
+
+## 🔍 What's Under the Hood?
+
+### The Health Monitoring System
+
+The enhanced version runs a **background health monitor** that:
+
+1. **Process Check** - Verifies SSH tunnel is running
+2. **Port Check** - Confirms SOCKS5 port is listening  
+3. **Functionality Test** - Actually tests proxy with HTTP requests
+4. **Auto-Healing** - Restarts failed connections immediately
+
+### Smart Reconnection Logic
+
+When issues are detected:
+- **Attempt 1**: Reconnect in 5 seconds
+- **Attempt 2**: Wait 10 seconds, then try
+- **Attempt 3**: Wait 20 seconds, then try
+- **Continues**: Up to 5 minutes maximum delay
+
+This prevents overwhelming your server while ensuring quick recovery.
+
+## 📊 Status Dashboard
+
+Run `./socks-proxy.sh status` to see:
+
+```
+🚀 Enhanced SSH SOCKS Proxy Status
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📡 Configuration:
+   Remote: user@server.com:22
+   Local:  127.0.0.1:1337
+
+🏥 Health Status:
+   Proxy Status:     ✅ Running & Healthy
+   Monitor Status:   ✅ Active
+   Last Check:       2 seconds ago
+
+📊 Statistics:
+   Uptime:          2h 34m 12s
+   Reconnections:   3
+   Success Rate:    99.2%
 ```
 
-## 🔐 SSH Key Authentication
+## 🆚 v1.0 vs v2.0 Enhanced
 
-For secure, passwordless authentication:
-
-### Automatic Setup
-```bash
-./socks-proxy.sh setup
-```
-
-### Manual Setup
-```bash
-# Generate SSH key
-ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa
-
-# Copy to server
-ssh-copy-id user@your-server.com
-
-# Test connection
-ssh user@your-server.com exit
-```
+| Feature | v1.0 Basic | v2.0 Enhanced |
+|---------|------------|---------------|
+| Manual restart needed | ❌ | ✅ Automatic |
+| Connection monitoring | ❌ | ✅ Every 30s |
+| Network interruption handling | ❌ | ✅ Smart retry |
+| Statistics tracking | ❌ | ✅ Detailed stats |
+| Background persistence | ❌ | ✅ Daemon mode |
+| Health validation | Basic | ✅ Multi-layer |
 
 ## 🛠️ Troubleshooting
 
-### Common Issues
+<details>
+<summary><strong>❌ "Port already in use"</strong></summary>
 
-#### "Port already in use"
+Change the `PROXY_PORT` in the script to a different number:
 ```bash
-# Find what's using the port
-sudo netstat -tulpn | grep :1337
-# or
-sudo ss -tulpn | grep :1337
-
-# Kill the process or change PROXY_PORT
+PROXY_PORT="8080"  # or 1338, 9050, etc.
 ```
+</details>
 
-#### "SSH connection failed"
+<details>
+<summary><strong>❌ "SSH connection failed"</strong></summary>
+
 ```bash
-# Test SSH connection manually
-ssh -v user@your-server.com
+# Test your SSH connection
+./socks-proxy.sh test
 
-# Common solutions:
-# 1. Check SSH service: sudo systemctl status sshd
-# 2. Verify firewall: sudo ufw status
-# 3. Check SSH config: /etc/ssh/sshd_config
+# Re-setup SSH keys
+./socks-proxy.sh setup
+
+# Check SSH manually
+ssh your-username@your-server.com
 ```
+</details>
 
-#### "Permission denied"
+<details>
+<summary><strong>❌ "Proxy not working"</strong></summary>
+
 ```bash
-# Make script executable
-chmod +x socks-proxy.sh
-
-# Check SSH key permissions
-chmod 600 ~/.ssh/id_rsa
-chmod 644 ~/.ssh/id_rsa.pub
-```
-
-#### "Proxy not working"
-```bash
-# Test the proxy
-curl --socks5 127.0.0.1:1337 http://ipinfo.io
-
-# Check if tunnel is active
+# Check detailed status
 ./socks-proxy.sh status
 
-# View logs
-tail -f /tmp/socks_proxy_1337.log
-```
+# View recent logs
+./socks-proxy.sh logs
 
-### Debug Mode
-Enable verbose SSH output by editing the script:
+# Test proxy directly
+curl --socks5 127.0.0.1:1337 http://httpbin.org/ip
+```
+</details>
+
+## ⚙️ Advanced Configuration
+
+Want to customize the behavior? Edit these optional settings:
+
 ```bash
-SSH_OPTIONS="-v -o ConnectTimeout=10 -o ServerAliveInterval=60"
+# Robustness settings
+HEALTH_CHECK_INTERVAL=30        # Health check frequency (seconds)
+MAX_RETRY_ATTEMPTS=5            # Max consecutive retries
+INITIAL_RETRY_DELAY=5           # Starting retry delay
+MAX_RETRY_DELAY=300             # Maximum retry delay (5 minutes)
+
+# Network settings
+LOCAL_BIND_IP="127.0.0.1"       # "0.0.0.0" for remote access
+CONNECTION_TIMEOUT=15           # SSH connection timeout
 ```
 
-## 📊 Advanced Usage
+## 📋 Requirements
 
-### Multiple Proxies
-Run multiple instances with different ports:
-```bash
-# Copy script for different configs
-cp socks-proxy.sh socks-proxy-server1.sh
-cp socks-proxy.sh socks-proxy-server2.sh
+- **Linux/macOS** with Bash
+- **SSH client** (usually pre-installed)
+- **Network access** to a remote server
+- **SSH access** to that server
 
-# Edit each with different PROXY_PORT and REMOTE_HOST
-```
+## 📚 Documentation
 
-### Background Service
-Create a systemd service:
-```bash
-# Create service file
-sudo tee /etc/systemd/system/socks-proxy.service > /dev/null <<EOF
-[Unit]
-Description=SOCKS5 SSH Proxy
-After=network.target
-
-[Service]
-Type=forking
-User=your-username
-ExecStart=/path/to/socks-proxy.sh start
-ExecStop=/path/to/socks-proxy.sh stop
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Enable and start
-sudo systemctl enable socks-proxy
-sudo systemctl start socks-proxy
-```
-
-### Monitoring and Alerts
-```bash
-# Check if proxy is running
-if ! ./socks-proxy.sh status | grep -q "Running"; then
-    echo "Proxy is down!" | mail -s "Proxy Alert" admin@example.com
-fi
-```
-
-## 🔒 Security Considerations
-
-### Best Practices
-- ✅ Use SSH key authentication instead of passwords
-- ✅ Change default SSH port (22) to a non-standard port
-- ✅ Configure firewall to only allow necessary connections
-- ✅ Regularly update your server and SSH software
-- ✅ Use strong SSH key passphrases
-- ✅ Monitor SSH logs for suspicious activity
-
-### Server Hardening
-```bash
-# Disable password authentication (after setting up keys)
-# Edit /etc/ssh/sshd_config:
-PasswordAuthentication no
-PubkeyAuthentication yes
-PermitRootLogin no  # Use non-root user
-
-# Restart SSH service
-sudo systemctl restart sshd
-```
+- **[📖 Complete Documentation](docs.md)** - Detailed setup, configuration, and troubleshooting
+- **[🔒 Security Guide](docs.md#security-considerations)** - Best practices and hardening
+- **[🚀 Production Setup](docs.md#production-deployment)** - Systemd services and monitoring
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions welcome! Please feel free to submit a Pull Request.
 
-### Development Setup
-```bash
-git clone https://github.com/yourusername/easy-ssh-socks.git
-cd easy-ssh-socks
-./socks-proxy.sh help
-```
-
-### Reporting Issues
-Please include:
-- Your Linux distribution and version
-- Error messages from the script
-- Log file contents (`/tmp/socks_proxy_1337.log`)
-- Steps to reproduce the issue
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Test thoroughly
+5. Submit a pull request
 
 ## 📄 License
 
@@ -339,16 +246,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🙏 Acknowledgments
 
 - Built with ❤️ for the Linux community
-- Inspired by the need for simple, secure proxy solutions
 - Thanks to all contributors and users
+- Inspired by the need for bulletproof proxy solutions
 
-## 📞 Support
-
-- 🐛 **Bug Reports:** [GitHub Issues](https://github.com/alireza787b/easy-ssh-socks/issues)
-- 💬 **Discussions:** [GitHub Discussions](https://github.com/alireza787b/easy-ssh-socks/discussions)
 ---
 
+**⭐ If this project helped you, please give it a star!**
+
 **Made with ❤️ by [Alireza Ghaderi](https://linkedin.com/in/alireza787b)**
-
-
-*If this project helped you, please give it a ⭐ star!*

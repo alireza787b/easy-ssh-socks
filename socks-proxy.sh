@@ -1,17 +1,25 @@
 #!/bin/bash
 
 # ============================================================================
-# EASY SSH SOCKS - Simple SOCKS5 Proxy Manager via SSH Tunnels
+# EASY SSH SOCKS - Robust SOCKS5 Proxy Manager via SSH Tunnels
 # ============================================================================
 # 
-# Description: A user-friendly SOCKS5 proxy manager that creates secure SSH 
-#              tunnels for proxy connections. Perfect for bypassing restrictions,
-#              securing connections, or accessing remote networks.
+# Description: A robust, self-healing SOCKS5 proxy manager that creates secure 
+#              SSH tunnels with automatic reconnection, health monitoring, and
+#              persistent connection management.
 #
-# Author: Alireza Ghaderi (https://www.linkedin.com/in/alireza787b/)
-# Version: 1.0.0
+# Author: Enhanced by AI Assistant based on Alireza Ghaderi's original work
+# Version: 2.0.0
 # License: MIT
 # Repository: https://github.com/alireza787b/easy-ssh-socks
+#
+# New Features in v2.0:
+#   - Automatic reconnection with exponential backoff
+#   - Health monitoring and connection validation
+#   - Persistent daemon mode for background operation
+#   - Better error handling and recovery
+#   - Connection statistics and monitoring
+#   - Graceful handling of network interruptions
 #
 # Prerequisites:
 #   - SSH client (openssh-client)
@@ -21,9 +29,9 @@
 # Quick Start:
 #   1. Edit the configuration section below
 #   2. Run: chmod +x socks-proxy.sh
-#   3. Run: ./socks-proxy.sh
-#   4. Use menu option 6 to setup SSH keys (recommended)
-#   5. Use menu option 1 to start the proxy
+#   3. Run: ./socks-proxy.sh setup (recommended for SSH keys)
+#   4. Run: ./socks-proxy.sh start
+#   5. Proxy will maintain connection automatically
 #
 # ============================================================================
 
@@ -40,17 +48,28 @@ REMOTE_PORT="22"                      # SSH port (usually 22)
 PROXY_PORT="1337"                     # Local port for SOCKS5 proxy
 LOCAL_BIND_IP="0.0.0.0"              # Bind IP (0.0.0.0 = all interfaces, 127.0.0.1 = localhost only)
 
-# Advanced SSH options (usually don't need to change)
-SSH_OPTIONS="-o ConnectTimeout=10 -o ServerAliveInterval=60 -o ServerAliveCountMax=3"
+# Robustness settings (NEW)
+HEALTH_CHECK_INTERVAL=30              # Seconds between health checks
+MAX_RETRY_ATTEMPTS=5                  # Maximum consecutive retry attempts
+INITIAL_RETRY_DELAY=5                 # Initial retry delay in seconds
+MAX_RETRY_DELAY=300                   # Maximum retry delay in seconds (5 minutes)
+CONNECTION_TIMEOUT=15                 # SSH connection timeout in seconds
+ENABLE_AUTO_RECONNECT=true            # Enable automatic reconnection
+DAEMON_MODE=false                     # Run as daemon (background process)
+
+# Advanced SSH options
+SSH_OPTIONS="-o ConnectTimeout=${CONNECTION_TIMEOUT} -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -o TCPKeepAlive=yes"
 
 # ============================================================================
 # SYSTEM VARIABLES - DO NOT EDIT
 # ============================================================================
 
 SCRIPT_NAME="$(basename "$0")"
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="2.0.0"
 PIDFILE="/tmp/socks_proxy_${PROXY_PORT}.pid"
+DAEMON_PIDFILE="/tmp/socks_daemon_${PROXY_PORT}.pid"
 LOGFILE="/tmp/socks_proxy_${PROXY_PORT}.log"
+STATS_FILE="/tmp/socks_stats_${PROXY_PORT}.json"
 LOCAL_IP=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "Unknown")
 
 # SSH command construction
@@ -61,7 +80,14 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
 NC='\033[0m' # No Color
+
+# Statistics variables
+START_TIME=""
+RECONNECT_COUNT=0
+LAST_RECONNECT=""
+TOTAL_UPTIME=0
 
 # ============================================================================
 # UTILITY FUNCTIONS
@@ -84,16 +110,34 @@ print_error() {
     echo -e "${RED}❌ $1${NC}"
 }
 
+print_debug() {
+    echo -e "${PURPLE}🔍 DEBUG: $1${NC}"
+}
+
 print_header() {
     echo
     echo "============================================"
-    echo "🚀 Easy SSH SOCKS - SOCKS5 Proxy Manager"
+    echo "🚀 Easy SSH SOCKS - Robust Proxy Manager v${SCRIPT_VERSION}"
     echo "============================================"
 }
 
-# Log function
+# Enhanced logging with levels
 log_message() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOGFILE"
+    local level="${2:-INFO}"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$timestamp] [$level] $1" >> "$LOGFILE"
+}
+
+log_error() {
+    log_message "$1" "ERROR"
+}
+
+log_warning() {
+    log_message "$1" "WARNING"
+}
+
+log_debug() {
+    log_message "$1" "DEBUG"
 }
 
 # Check if command exists
@@ -101,7 +145,7 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Validate configuration
+# Enhanced configuration validation
 validate_config() {
     local errors=0
     
@@ -125,10 +169,15 @@ validate_config() {
         errors=$((errors + 1))
     fi
     
+    if ! [[ "$HEALTH_CHECK_INTERVAL" =~ ^[0-9]+$ ]] || [ "$HEALTH_CHECK_INTERVAL" -lt 10 ]; then
+        print_error "HEALTH_CHECK_INTERVAL must be at least 10 seconds"
+        errors=$((errors + 1))
+    fi
+    
     return $errors
 }
 
-# Check prerequisites
+# Check prerequisites with enhanced detection
 check_prerequisites() {
     print_info "Checking prerequisites..."
     
@@ -150,29 +199,250 @@ check_prerequisites() {
         return 1
     fi
     
-    print_success "All prerequisites satisfied"
+    # Check for optional but recommended tools
+    if ! command_exists netstat && ! command_exists ss; then
+        print_warning "Neither netstat nor ss found. Port checking will be limited."
+    fi
+    
+    if ! command_exists curl && ! command_exists wget; then
+        print_warning "Neither curl nor wget found. Connection testing will be limited."
+    fi
+    
+    print_success "Prerequisites check completed"
     return 0
 }
 
-# Test SSH connection
+# Enhanced SSH connection test with timeout
 test_ssh_connection() {
     print_info "Testing SSH connection to ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PORT}..."
     
-    if ssh ${SSH_OPTIONS} -p ${REMOTE_PORT} -o BatchMode=yes -o PasswordAuthentication=no ${REMOTE_USER}@${REMOTE_HOST} exit 2>/dev/null; then
+    # Test with timeout
+    if timeout ${CONNECTION_TIMEOUT} ssh ${SSH_OPTIONS} -p ${REMOTE_PORT} -o BatchMode=yes -o PasswordAuthentication=no ${REMOTE_USER}@${REMOTE_HOST} exit 2>/dev/null; then
         print_success "SSH connection successful (key-based authentication)"
         return 0
     else
-        print_warning "SSH key-based authentication failed"
-        print_info "You may need to setup SSH keys or use password authentication"
+        print_warning "SSH key-based authentication failed or timed out"
+        print_info "You may need to setup SSH keys or check network connectivity"
         return 1
     fi
 }
 
 # ============================================================================
-# CORE PROXY FUNCTIONS
+# STATISTICS AND MONITORING FUNCTIONS
 # ============================================================================
 
-# Display current proxy status and configuration
+# Initialize statistics
+init_stats() {
+    local current_time=$(date +%s)
+    cat > "$STATS_FILE" <<EOF
+{
+    "start_time": $current_time,
+    "start_time_human": "$(date)",
+    "reconnect_count": 0,
+    "last_reconnect": null,
+    "total_downtime": 0,
+    "version": "$SCRIPT_VERSION"
+}
+EOF
+}
+
+# Update statistics
+update_stats() {
+    local field="$1"
+    local value="$2"
+    
+    if [ -f "$STATS_FILE" ]; then
+        # Simple JSON update (works without jq)
+        if [ "$field" = "reconnect_count" ]; then
+            local current_count=$(grep '"reconnect_count"' "$STATS_FILE" | grep -o '[0-9]*')
+            local new_count=$((current_count + 1))
+            sed -i "s/\"reconnect_count\": [0-9]*/\"reconnect_count\": $new_count/" "$STATS_FILE"
+        elif [ "$field" = "last_reconnect" ]; then
+            sed -i "s/\"last_reconnect\": [^,]*/\"last_reconnect\": \"$(date)\"/" "$STATS_FILE"
+        fi
+    fi
+}
+
+# Get statistics
+get_stats() {
+    if [ -f "$STATS_FILE" ]; then
+        local start_time=$(grep '"start_time"' "$STATS_FILE" | grep -o '[0-9]*' | head -1)
+        local current_time=$(date +%s)
+        local uptime=$((current_time - start_time))
+        local reconnect_count=$(grep '"reconnect_count"' "$STATS_FILE" | grep -o '[0-9]*')
+        
+        echo "📈 Connection Statistics:"
+        echo "   Total Uptime: $(format_duration $uptime)"
+        echo "   Reconnections: $reconnect_count"
+        
+        if [ "$reconnect_count" -gt 0 ]; then
+            local last_reconnect=$(grep '"last_reconnect"' "$STATS_FILE" | sed 's/.*"last_reconnect": "\([^"]*\)".*/\1/')
+            echo "   Last Reconnect: $last_reconnect"
+        fi
+    fi
+}
+
+# Format duration in human readable format
+format_duration() {
+    local duration=$1
+    local days=$((duration / 86400))
+    local hours=$(((duration % 86400) / 3600))
+    local minutes=$(((duration % 3600) / 60))
+    local seconds=$((duration % 60))
+    
+    if [ $days -gt 0 ]; then
+        echo "${days}d ${hours}h ${minutes}m ${seconds}s"
+    elif [ $hours -gt 0 ]; then
+        echo "${hours}h ${minutes}m ${seconds}s"
+    elif [ $minutes -gt 0 ]; then
+        echo "${minutes}m ${seconds}s"
+    else
+        echo "${seconds}s"
+    fi
+}
+
+# ============================================================================
+# HEALTH MONITORING AND RECONNECTION FUNCTIONS
+# ============================================================================
+
+# Check if proxy is healthy
+is_proxy_healthy() {
+    local pid=$1
+    
+    # Check if process is running
+    if ! ps -p "$pid" > /dev/null 2>&1; then
+        log_debug "Process $pid is not running"
+        return 1
+    fi
+    
+    # Check if port is listening
+    if command_exists netstat; then
+        if ! netstat -tuln 2>/dev/null | grep -q ":${PROXY_PORT} "; then
+            log_debug "Port $PROXY_PORT is not listening (netstat)"
+            return 1
+        fi
+    elif command_exists ss; then
+        if ! ss -tuln 2>/dev/null | grep -q ":${PROXY_PORT} "; then
+            log_debug "Port $PROXY_PORT is not listening (ss)"
+            return 1
+        fi
+    fi
+    
+    # Advanced health check: try to connect through the proxy
+    if command_exists curl; then
+        if ! timeout 10 curl --socks5 "127.0.0.1:${PROXY_PORT}" -s "http://httpbin.org/ip" >/dev/null 2>&1; then
+            log_debug "Proxy functionality test failed"
+            return 1
+        fi
+    fi
+    
+    return 0
+}
+
+# Calculate retry delay with exponential backoff
+calculate_retry_delay() {
+    local attempt=$1
+    local delay=$((INITIAL_RETRY_DELAY * (2 ** (attempt - 1))))
+    
+    if [ $delay -gt $MAX_RETRY_DELAY ]; then
+        delay=$MAX_RETRY_DELAY
+    fi
+    
+    echo $delay
+}
+
+# Start SSH tunnel with retry logic
+start_ssh_tunnel() {
+    local attempt=1
+    local delay=$INITIAL_RETRY_DELAY
+    
+    while [ $attempt -le $MAX_RETRY_ATTEMPTS ]; do
+        log_message "Starting SSH tunnel (attempt $attempt/$MAX_RETRY_ATTEMPTS)"
+        
+        # Start the SSH tunnel
+        nohup $SSH_CMD > "$LOGFILE" 2>&1 &
+        local ssh_pid=$!
+        
+        # Save PID
+        echo $ssh_pid > "$PIDFILE"
+        
+        # Wait and check if it started successfully
+        sleep 3
+        
+        if is_proxy_healthy $ssh_pid; then
+            log_message "SSH tunnel started successfully (PID: $ssh_pid)"
+            return 0
+        else
+            log_error "SSH tunnel failed to start properly (attempt $attempt)"
+            
+            # Kill the failed process if it's still running
+            if ps -p $ssh_pid > /dev/null 2>&1; then
+                kill $ssh_pid 2>/dev/null
+            fi
+            rm -f "$PIDFILE"
+            
+            if [ $attempt -lt $MAX_RETRY_ATTEMPTS ]; then
+                delay=$(calculate_retry_delay $attempt)
+                log_message "Retrying in $delay seconds..."
+                sleep $delay
+            fi
+        fi
+        
+        attempt=$((attempt + 1))
+    done
+    
+    log_error "Failed to start SSH tunnel after $MAX_RETRY_ATTEMPTS attempts"
+    return 1
+}
+
+# Health monitoring daemon
+health_monitor_daemon() {
+    log_message "Starting health monitor daemon"
+    
+    while true; do
+        if [ -f "$PIDFILE" ]; then
+            local pid=$(cat "$PIDFILE" 2>/dev/null)
+            
+            if [ -n "$pid" ]; then
+                if is_proxy_healthy "$pid"; then
+                    log_debug "Health check passed for PID $pid"
+                else
+                    log_warning "Health check failed for PID $pid, attempting reconnection"
+                    
+                    # Kill the unhealthy process
+                    if ps -p "$pid" > /dev/null 2>&1; then
+                        kill "$pid" 2>/dev/null
+                    fi
+                    rm -f "$PIDFILE"
+                    
+                    # Update statistics
+                    update_stats "reconnect_count" ""
+                    update_stats "last_reconnect" ""
+                    
+                    # Attempt to restart
+                    if start_ssh_tunnel; then
+                        log_message "Successfully reconnected proxy"
+                    else
+                        log_error "Failed to reconnect proxy, will retry on next health check"
+                    fi
+                fi
+            fi
+        else
+            log_debug "No PID file found, proxy appears to be stopped"
+            break
+        fi
+        
+        sleep "$HEALTH_CHECK_INTERVAL"
+    done
+    
+    log_message "Health monitor daemon stopped"
+}
+
+# ============================================================================
+# ENHANCED CORE PROXY FUNCTIONS
+# ============================================================================
+
+# Enhanced status display
 print_status() {
     print_header
     echo
@@ -183,6 +453,8 @@ print_status() {
     echo " Proxy Bind IP      : $LOCAL_BIND_IP"
     echo " Proxy Port         : $PROXY_PORT"
     echo " Remote SSH Target  : $REMOTE_USER@$REMOTE_HOST:$REMOTE_PORT"
+    echo " Auto-Reconnect     : $ENABLE_AUTO_RECONNECT"
+    echo " Health Check       : ${HEALTH_CHECK_INTERVAL}s intervals"
     echo " PID File           : $PIDFILE"
     echo " Log File           : $LOGFILE"
     echo "----------------------------------------"
@@ -191,21 +463,23 @@ print_status() {
     if [ -f "$PIDFILE" ]; then
         PID=$(cat "$PIDFILE" 2>/dev/null)
         if [ -n "$PID" ] && ps -p "$PID" > /dev/null 2>&1; then
-            print_success "Proxy Status: Running (PID: $PID)"
+            if is_proxy_healthy "$PID"; then
+                print_success "Proxy Status: Running and Healthy (PID: $PID)"
+            else
+                print_warning "Proxy Status: Running but Unhealthy (PID: $PID)"
+            fi
             
-            # Check if port is actually listening
-            if command_exists netstat; then
-                if netstat -tuln 2>/dev/null | grep -q ":${PROXY_PORT} "; then
-                    print_success "Port $PROXY_PORT is listening"
+            # Show daemon status
+            if [ -f "$DAEMON_PIDFILE" ]; then
+                local daemon_pid=$(cat "$DAEMON_PIDFILE" 2>/dev/null)
+                if [ -n "$daemon_pid" ] && ps -p "$daemon_pid" > /dev/null 2>&1; then
+                    print_success "Health Monitor: Active (PID: $daemon_pid)"
                 else
-                    print_warning "Port $PROXY_PORT is not listening"
+                    print_warning "Health Monitor: Not running"
+                    rm -f "$DAEMON_PIDFILE"
                 fi
-            elif command_exists ss; then
-                if ss -tuln 2>/dev/null | grep -q ":${PROXY_PORT} "; then
-                    print_success "Port $PROXY_PORT is listening"
-                else
-                    print_warning "Port $PROXY_PORT is not listening"
-                fi
+            else
+                print_info "Health Monitor: Not running"
             fi
         else
             print_warning "PID file exists but process is not running"
@@ -216,17 +490,24 @@ print_status() {
         print_error "Proxy Status: Not running"
     fi
     
+    # Show statistics
+    if [ -f "$STATS_FILE" ]; then
+        echo
+        get_stats
+    fi
+    
     echo
     echo "💡 Usage Instructions:"
     echo "   Configure your applications to use SOCKS5 proxy:"
     echo "   Server: $LOCAL_IP (or 127.0.0.1 for local use)"
     echo "   Port: $PROXY_PORT"
+    echo "   No authentication required"
     echo
 }
 
-# Start the SOCKS5 proxy
+# Enhanced start function with daemon support
 start_proxy() {
-    print_info "Starting SOCKS5 proxy..."
+    print_info "Starting robust SOCKS5 proxy..."
     
     # Validate configuration first
     if ! validate_config; then
@@ -238,42 +519,41 @@ start_proxy() {
     if [ -f "$PIDFILE" ]; then
         PID=$(cat "$PIDFILE" 2>/dev/null)
         if [ -n "$PID" ] && ps -p "$PID" > /dev/null 2>&1; then
-            print_warning "Proxy already running (PID: $PID)"
-            return 0
+            if is_proxy_healthy "$PID"; then
+                print_warning "Proxy already running and healthy (PID: $PID)"
+                return 0
+            else
+                print_info "Existing proxy is unhealthy, stopping it first..."
+                stop_proxy
+            fi
         else
             print_info "Removing stale PID file..."
             rm -f "$PIDFILE"
         fi
     fi
     
-    # Check if port is already in use
-    if command_exists netstat; then
-        if netstat -tuln 2>/dev/null | grep -q ":${PROXY_PORT} "; then
-            print_error "Port $PROXY_PORT is already in use by another process"
-            return 1
-        fi
-    elif command_exists ss; then
-        if ss -tuln 2>/dev/null | grep -q ":${PROXY_PORT} "; then
-            print_error "Port $PROXY_PORT is already in use by another process"
-            return 1
-        fi
-    fi
+    # Initialize statistics
+    init_stats
     
     # Start the SSH tunnel
-    log_message "Starting SSH tunnel: $SSH_CMD"
-    nohup $SSH_CMD > "$LOGFILE" 2>&1 &
-    SSH_PID=$!
-    
-    # Save PID
-    echo $SSH_PID > "$PIDFILE"
-    
-    # Wait a moment and check if it's still running
-    sleep 2
-    if ps -p $SSH_PID > /dev/null 2>&1; then
+    if start_ssh_tunnel; then
+        local ssh_pid=$(cat "$PIDFILE")
         print_success "SOCKS5 proxy started successfully!"
-        print_success "PID: $SSH_PID"
+        print_success "PID: $ssh_pid"
         print_success "Listening on: ${LOCAL_BIND_IP}:${PROXY_PORT}"
-        log_message "Proxy started successfully (PID: $SSH_PID)"
+        
+        # Start health monitoring daemon if auto-reconnect is enabled
+        if [ "$ENABLE_AUTO_RECONNECT" = "true" ]; then
+            print_info "Starting health monitoring daemon..."
+            
+            # Start daemon in background
+            (health_monitor_daemon) &
+            local daemon_pid=$!
+            echo $daemon_pid > "$DAEMON_PIDFILE"
+            
+            print_success "Health monitor started (PID: $daemon_pid)"
+            print_info "Proxy will automatically reconnect if connection is lost"
+        fi
         
         # Show connection info
         echo
@@ -282,63 +562,89 @@ start_proxy() {
         echo "  Server: $LOCAL_IP (or 127.0.0.1)"
         echo "  Port: $PROXY_PORT"
         echo "  Authentication: None"
-    else
-        print_error "Failed to start proxy. Check the log file: $LOGFILE"
-        rm -f "$PIDFILE"
-        return 1
-    fi
-}
-
-# Stop the SOCKS5 proxy
-stop_proxy() {
-    print_info "Stopping SOCKS5 proxy..."
-    
-    if [ ! -f "$PIDFILE" ]; then
-        print_warning "Proxy is not running (no PID file found)"
+        
+        log_message "Proxy started successfully with health monitoring"
         return 0
-    fi
-    
-    PID=$(cat "$PIDFILE" 2>/dev/null)
-    if [ -z "$PID" ]; then
-        print_error "Invalid PID file"
-        rm -f "$PIDFILE"
+    else
+        print_error "Failed to start proxy after multiple attempts"
         return 1
     fi
-    
-    if ps -p "$PID" > /dev/null 2>&1; then
-        print_info "Terminating process (PID: $PID)..."
-        kill "$PID" 2>/dev/null
-        
-        # Wait for process to terminate
-        local count=0
-        while ps -p "$PID" > /dev/null 2>&1 && [ $count -lt 10 ]; do
-            sleep 1
-            count=$((count + 1))
-        done
-        
-        if ps -p "$PID" > /dev/null 2>&1; then
-            print_warning "Process didn't terminate gracefully, using force..."
-            kill -9 "$PID" 2>/dev/null
-        fi
-        
-        print_success "Proxy stopped successfully"
-        log_message "Proxy stopped (PID: $PID)"
-    else
-        print_warning "Process not found, cleaning up PID file"
-    fi
-    
-    rm -f "$PIDFILE"
 }
 
-# Restart the proxy
+# Enhanced stop function
+stop_proxy() {
+    print_info "Stopping SOCKS5 proxy and health monitor..."
+    
+    local stopped_something=false
+    
+    # Stop health monitoring daemon first
+    if [ -f "$DAEMON_PIDFILE" ]; then
+        local daemon_pid=$(cat "$DAEMON_PIDFILE" 2>/dev/null)
+        if [ -n "$daemon_pid" ] && ps -p "$daemon_pid" > /dev/null 2>&1; then
+            print_info "Stopping health monitor daemon (PID: $daemon_pid)..."
+            kill "$daemon_pid" 2>/dev/null
+            
+            # Wait for daemon to stop
+            local count=0
+            while ps -p "$daemon_pid" > /dev/null 2>&1 && [ $count -lt 5 ]; do
+                sleep 1
+                count=$((count + 1))
+            done
+            
+            if ps -p "$daemon_pid" > /dev/null 2>&1; then
+                kill -9 "$daemon_pid" 2>/dev/null
+            fi
+            
+            print_success "Health monitor stopped"
+            stopped_something=true
+        fi
+        rm -f "$DAEMON_PIDFILE"
+    fi
+    
+    # Stop main proxy process
+    if [ -f "$PIDFILE" ]; then
+        PID=$(cat "$PIDFILE" 2>/dev/null)
+        if [ -n "$PID" ] && ps -p "$PID" > /dev/null 2>&1; then
+            print_info "Terminating proxy process (PID: $PID)..."
+            kill "$PID" 2>/dev/null
+            
+            # Wait for process to terminate
+            local count=0
+            while ps -p "$PID" > /dev/null 2>&1 && [ $count -lt 10 ]; do
+                sleep 1
+                count=$((count + 1))
+            done
+            
+            if ps -p "$PID" > /dev/null 2>&1; then
+                print_warning "Process didn't terminate gracefully, using force..."
+                kill -9 "$PID" 2>/dev/null
+                sleep 1
+            fi
+            
+            print_success "Proxy stopped successfully"
+            log_message "Proxy stopped (PID: $PID)"
+            stopped_something=true
+        fi
+        rm -f "$PIDFILE"
+    fi
+    
+    if ! $stopped_something; then
+        print_warning "Proxy was not running"
+    fi
+    
+    # Clean up statistics file
+    rm -f "$STATS_FILE"
+}
+
+# Enhanced restart function
 restart_proxy() {
-    print_info "Restarting SOCKS5 proxy..."
+    print_info "Restarting robust SOCKS5 proxy..."
     stop_proxy
-    sleep 2
+    sleep 3
     start_proxy
 }
 
-# Setup SSH key for passwordless authentication
+# Setup SSH key for passwordless authentication (unchanged but with better logging)
 setup_ssh_key() {
     print_header
     echo
@@ -399,21 +705,32 @@ setup_ssh_key() {
         print_info "Please check your credentials and network connectivity"
         return 1
     fi
+    
+    log_message "SSH key setup completed"
 }
 
-# Show help information
+# Enhanced help with new features
 print_help() {
     print_header
     echo
     echo "📘 Usage: $SCRIPT_NAME [COMMAND]"
     echo
     echo "COMMANDS:"
-    echo "  start    - Start the SOCKS5 proxy tunnel"
-    echo "  stop     - Stop the running proxy tunnel"
-    echo "  restart  - Restart the proxy tunnel"
-    echo "  status   - Show current proxy status and configuration"
+    echo "  start    - Start the robust SOCKS5 proxy with health monitoring"
+    echo "  stop     - Stop the proxy and health monitor"
+    echo "  restart  - Restart the proxy system"
+    echo "  status   - Show detailed proxy status and statistics"
     echo "  setup    - Setup SSH key for passwordless authentication"
+    echo "  test     - Test SSH connection to remote server"
+    echo "  logs     - Show recent log entries"
     echo "  help     - Show this help message"
+    echo
+    echo "ROBUST FEATURES (NEW in v2.0):"
+    echo "  • Automatic reconnection with exponential backoff"
+    echo "  • Health monitoring every ${HEALTH_CHECK_INTERVAL} seconds"
+    echo "  • Connection statistics tracking"
+    echo "  • Graceful handling of network interruptions"
+    echo "  • Persistent background operation"
     echo
     echo "CONFIGURATION:"
     echo "  Edit the configuration section at the top of this script:"
@@ -421,12 +738,14 @@ print_help() {
     echo "  - REMOTE_HOST: Remote server IP or hostname"
     echo "  - REMOTE_PORT: SSH port (default: 22)"
     echo "  - PROXY_PORT: Local SOCKS5 proxy port"
-    echo "  - LOCAL_BIND_IP: Bind IP (0.0.0.0 for all interfaces)"
+    echo "  - ENABLE_AUTO_RECONNECT: Enable automatic reconnection"
+    echo "  - HEALTH_CHECK_INTERVAL: Seconds between health checks"
     echo
     echo "EXAMPLES:"
-    echo "  $SCRIPT_NAME start     # Start the proxy"
-    echo "  $SCRIPT_NAME status    # Check proxy status"
-    echo "  $SCRIPT_NAME setup     # Setup SSH keys"
+    echo "  $SCRIPT_NAME setup     # Setup SSH keys (recommended first step)"
+    echo "  $SCRIPT_NAME start     # Start robust proxy with monitoring"
+    echo "  $SCRIPT_NAME status    # Check detailed status and stats"
+    echo "  $SCRIPT_NAME logs      # View recent activity"
     echo
     echo "PROXY USAGE:"
     echo "  Configure your applications to use SOCKS5 proxy:"
@@ -434,30 +753,41 @@ print_help() {
     echo "  - Port: $PROXY_PORT"
     echo "  - No authentication required"
     echo
-    echo "COMMON APPLICATIONS:"
-    echo "  - Firefox: Settings → Network → Manual proxy"
-    echo "  - Chrome: Use with proxy extensions"
-    echo "  - curl: curl --socks5 $LOCAL_IP:$PROXY_PORT http://example.com"
+    echo "The proxy will automatically reconnect if the connection is lost!"
     echo
 }
 
-# Interactive menu for user-friendly operation
+# New function to show logs
+show_logs() {
+    if [ -f "$LOGFILE" ]; then
+        print_info "Recent log entries (last 30 lines):"
+        echo "----------------------------------------"
+        tail -30 "$LOGFILE"
+        echo "----------------------------------------"
+        echo "Full log file: $LOGFILE"
+    else
+        print_info "No log file found"
+    fi
+}
+
+# Enhanced interactive menu
 interactive_menu() {
     while true; do
         print_status
         echo "🔧 What would you like to do?"
         echo "----------------------------------------"
-        echo "  1) Start proxy"
+        echo "  1) Start robust proxy"
         echo "  2) Stop proxy"
         echo "  3) Restart proxy"
-        echo "  4) Show status"
+        echo "  4) Show detailed status"
         echo "  5) Setup SSH key"
-        echo "  6) Show help"
-        echo "  7) View log file"
+        echo "  6) Test SSH connection"
+        echo "  7) View recent logs"
+        echo "  8) Show help"
         echo "  0) Exit"
         echo "----------------------------------------"
         
-        read -p "👉 Enter your choice (0-7): " choice
+        read -p "👉 Enter your choice (0-8): " choice
         echo
         
         case $choice in
@@ -466,19 +796,12 @@ interactive_menu() {
             3) restart_proxy ;;
             4) print_status ;;
             5) setup_ssh_key ;;
-            6) print_help ;;
-            7) 
-                if [ -f "$LOGFILE" ]; then
-                    print_info "Last 20 lines of log file:"
-                    echo "----------------------------------------"
-                    tail -20 "$LOGFILE"
-                    echo "----------------------------------------"
-                else
-                    print_info "No log file found"
-                fi
-                ;;
+            6) test_ssh_connection ;;
+            7) show_logs ;;
+            8) print_help ;;
             0) 
                 print_success "Goodbye! 👋"
+                print_info "Note: Proxy will continue running in background if started"
                 exit 0 
                 ;;
             *) 
@@ -495,9 +818,10 @@ interactive_menu() {
 # MAIN SCRIPT EXECUTION
 # ============================================================================
 
-# Trap to cleanup on script exit
+# Enhanced cleanup function
 cleanup() {
-    print_info "Script interrupted. Cleaning up..."
+    print_info "Script interrupted. Proxy will continue running in background."
+    print_info "Use '$SCRIPT_NAME stop' to stop the proxy."
     exit 0
 }
 
@@ -529,6 +853,12 @@ else
             ;;
         setup)
             setup_ssh_key
+            ;;
+        test)
+            test_ssh_connection
+            ;;
+        logs)
+            show_logs
             ;;
         help|--help|-h)
             print_help
